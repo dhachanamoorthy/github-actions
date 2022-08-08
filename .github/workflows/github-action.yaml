@@ -1,0 +1,75 @@
+# This workflow will do a clean installation of node dependencies, cache/restore them, build the source code and run tests across different versions of node
+# For more information see: https://help.github.com/actions/language-and-framework-guides/using-nodejs-with-github-actions
+env:
+  EB_APPLICATION_NAME: "moorthy-myapp"
+  EB_APP_ENV_NAME: "Moorthymyapp-env"
+  DEPLOY_PACKAGE_NAME: "moorthy-${{ github.sha }}.zip"
+  AWS_REGION_NAME: "ap-south-1"
+  AWS_BUCKET_NAME: "myapp-artifects"
+name: CI/CD
+
+on:
+  push:
+    branches: ["master"]
+jobs:
+  build:
+    runs-on: self-hosted
+
+    strategy:
+      matrix:
+        node-version: [14.x]
+        # See supported Node.js release schedule at https://nodejs.org/en/about/releases/
+
+    steps:
+      - uses: actions/checkout@v3
+      - name: Use Node.js ${{ matrix.node-version }}
+        uses: actions/setup-node@v3
+        with:
+          node-version: ${{ matrix.node-version }}
+          cache: "npm"
+      - run: npm ci
+      - run: npm run build --if-present
+      - run: npm test
+
+      - name: Compress build to ZIP file
+        run: |
+          cd build
+          pwd
+          touch Procfile
+          echo web: node app.js >> Procfile #to run the applications once the build deployed successfully
+          zip -r ${{ env.DEPLOY_PACKAGE_NAME }} ./
+
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v1
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION_NAME }}
+
+      - name: Copy ZIP file to S3 bucket
+        run: |
+          cd build
+          pwd
+          aws s3 cp ${{ env.DEPLOY_PACKAGE_NAME }} s3://${{ env.AWS_BUCKET_NAME }}
+      - name: Completion of CI Pipleline
+        run: echo "Build finished successfully"
+
+  deploy:
+    runs-on: self-hosted
+    needs: [build]
+    steps:
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v1
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION_NAME }}
+
+      - name: Create new ElasticBeanStalk Version
+        run: |
+          aws elasticbeanstalk create-application-version --application-name reactapp --source-bundle '{"S3Bucket":"${{ env.AWS_BUCKET_NAME }}","S3Key": "${{ env.DEPLOY_PACKAGE_NAME }}"}' --version-label "Ver-${{ github.sha }}" --description "${{ github.sha }}"
+      - name: Deploy new version to EBS
+        run: aws elasticbeanstalk update-environment --environment-name ${{ env.EB_APP_ENV_NAME }} --version-label "Ver-${{ github.sha }}"
+
+      - name: Completion of CD Pipleline
+        run: echo "Deployment finished successfully"
