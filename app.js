@@ -5,8 +5,7 @@ const response = {
     message: 'Health Check',
     status: 'OK',
     uptime: `${process.uptime().toFixed(0)} seconds`,
-    nodeVersion: process.versions.node,
-    time: new Date().toISOString(),
+    nodeVersion: process.versions.node
   };
 app.get("/", function(req,res){
     res.send(response);
